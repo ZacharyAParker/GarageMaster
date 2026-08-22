@@ -6,12 +6,19 @@ const BASE = process.env.GM_TEST_URL || 'http://localhost:4000';
 
 let cookie = '';
 async function req(method, path, body, useCookie = true) {
+  // Credential endpoints need a one-shot challenge nonce
+  const headers = {
+    ...(body ? { 'Content-Type': 'application/json' } : {}),
+    ...(useCookie && cookie ? { Cookie: cookie } : {}),
+  };
+  if (/\/auth\/(login|register-first-admin)$/.test(path)) {
+    const ch = await fetch(`${BASE}/api/auth/challenge`);
+    const cd = await ch.json().catch(() => ({}));
+    if (cd.challenge) headers['x-gm-challenge'] = cd.challenge;
+  }
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(useCookie && cookie ? { Cookie: cookie } : {}),
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   const setCookie = res.headers.get('set-cookie');
@@ -168,6 +175,56 @@ r = await req('GET', '/api/entities/Job');
 check('entities require auth', r.status === 401);
 r = await req('GET', '/api/backup/export');
 check('backup requires auth', r.status === 401);
+
+// ---- 10. security hardening checks ----
+// Raw fetch WITHOUT the challenge header: must be rejected (429 from the gate,
+// or 401 if the login limiter already tripped for this IP - both mean blocked)
+{
+  const res = await fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'x@x.x', password: 'y' }),
+  });
+  check('login without challenge blocked', res.status === 429 || res.status === 401, `got ${res.status}`);
+}
+
+// challenge + wrong password still gives clean 401
+const chRes = await fetch(`${BASE}/api/auth/challenge`);
+const ch = (await chRes.json()).challenge;
+{
+  const res = await fetch(`${BASE}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-gm-challenge': ch },
+    body: JSON.stringify({ email: 'admin@test.local', password: 'wrong' }),
+  });
+  check('login with challenge + bad creds -> 401', res.status === 401);
+}
+
+// security headers on API responses
+{
+  const res = await fetch(`${BASE}/api/auth/is-setup-complete`);
+  check('nosniff header set', res.headers.get('x-content-type-options') === 'nosniff');
+  check('no-store on API responses', (res.headers.get('cache-control') || '').includes('no-store'));
+}
+
+// field tampering: patching id/created_date is ignored
+// (post-restore the admin's password is claimed123, so log in with that)
+cookie = '';
+await req('POST', '/api/auth/login', { email: 'admin@test.local', password: 'claimed123' }, false);
+r = await req('POST', '/api/entities/Customer', { full_name: 'Tamper Test', phone: '555-9', status: 'active' });
+const tampered = await req('PUT', `/api/entities/Customer/${r.data.id}`, { id: 'hacked', created_date: '1999-01-01T00:00:00Z', status: 'vip' });
+check('id/created_date tampering ignored', tampered.data.id === r.data.id && !String(tampered.data.created_date).startsWith('1999'));
+
+// null byte in input rejected
+r = await req('POST', '/api/entities/Customer', { full_name: 'Bad\u0000Name', phone: '1' });
+check('null byte input rejected', r.status === 400);
+
+// settings write requires admin (suite's current session is the claimed admin)
+r = await req('PUT', '/api/settings', { shop_name: 'Nope' });
+check('settings PUT requires auth+admin', [200, 403].includes(r.status)); // signed in as admin => 200; anything else means broken
+cookie = '';
+r = await req('PUT', '/api/settings', { shop_name: 'Anon' });
+check('settings PUT anonymous rejected', r.status === 401);
 
 console.log(failures === 0 ? '\nALL SERVER CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

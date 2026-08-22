@@ -5,7 +5,8 @@ services:
     environment:
       POSTGRES_DB: garagemaster
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${PGPASSWORD:-postgres}
+      # Required. No default: the stack refuses to start without a real password.
+      POSTGRES_PASSWORD: ${PGPASSWORD:?Set PGPASSWORD in your environment or .env}
     volumes:
       - garagemaster-pgdata:/var/lib/postgresql/data
     restart: unless-stopped
@@ -27,8 +28,10 @@ services:
       PGPORT: "5432"
       PGDATABASE: garagemaster
       PGUSER: postgres
-      PGPASSWORD: ${PGPASSWORD:-postgres}
+      PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD in your environment or .env}
       PORT: "4000"
+      FORCE_HTTPS: ${FORCE_HTTPS:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
       - "8088:4000"
     restart: unless-stopped

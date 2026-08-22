@@ -24,4 +24,9 @@ dist-ssr
 *.sw?
 base64client.js
 
+# secrets
 .env
+.env.local
+.env.*.local
+*.pem
+*.key

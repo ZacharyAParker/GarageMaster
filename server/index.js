@@ -6,6 +6,7 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import { sep } from 'path';
 import { pgPool } from './db.js';
+import { securityHeaders, hsts, apiLimiter, sanitizeBody } from './lib/security.js';
 import authRoutes from './routes/auth.js';
 import entityRoutes from './routes/entities.js';
 import settingsRoutes from './routes/settings.js';
@@ -14,11 +15,13 @@ import fileRoutes from './routes/files.js';
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(hsts);
+app.use(securityHeaders);
+app.use(apiLimiter);
 app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
-
-// A proxy in front (nginx/traefik) sets X-Forwarded-Proto for secure cookies
-app.set('trust proxy', 1);
+app.use(sanitizeBody());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/entities', entityRoutes);
