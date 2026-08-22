@@ -1,8 +1,8 @@
 # GarageMaster
 
-Auto shop management app built with React + Vite. No backend, no accounts to sign up for, nothing phones home. All data lives in your browser's localStorage.
+Auto shop management app. React frontend, Express API, PostgreSQL storage. Run it on one box or across the shop network - every terminal sees the same live data.
 
-I wanted a shop tracker I could actually self-host without standing up a database server, so this runs entirely client side. Open it in a browser, create the admin account on first launch, and go.
+I started this as a fully client side app and moved it to a real backend so multiple browsers (front counter, bays, office) work off one database instead of each having their own copy stuck in localStorage.
 
 ## Features
 
@@ -21,44 +21,51 @@ I wanted a shop tracker I could actually self-host without standing up a databas
 * **Reports** with KPI cards, 12 month revenue chart, work mix breakdown, mechanic performance bars, date range filters and CSV export
 
 ### Platform
-* Runs entirely in the browser. Deploy it anywhere static files are served
-* PBKDF2 password hashing with per user salts, hashes never leave the data layer
-* Role based access - admins, managers, service advisors, mechanics, parts specialists all see different things
-* JSON backup/restore built into settings for moving between machines or just keeping backups
-* Cross tab sync, so two browsers on the same shop machine stay current with each other
+* PostgreSQL backend. Everything saved is in the database, not somebody's browser
+* Live sync: changes from any terminal show up in every other open browser within a second (server-sent events)
+* PBKDF2 password hashing with per user salts, done server side. Hashes never leave the server
+* Cookie based sessions stored in Postgres, so signing in survives restarts and works from any machine on the network
+* Role based access - admins, managers, service advisors, mechanics and parts specialists all see different things
+* JSON backup/restore built into settings. Backups from the old localStorage version import cleanly
 * Ctrl+K search across jobs, customers, vehicles and invoices
-* Demo data seeder on first launch if you want to click around before entering real work
+* Demo data seeder if you want to click around before entering real work
 * Configurable tax rate and default labor rate used across billing
 
 ## Tech stack
 
-React 18, Vite 6, React Router, TanStack Query, Recharts, Tailwind CSS with Radix UI components, lucide icons. Persistence is a small custom localStorage client in `src/api/client.js`.
+React 18, Vite 6, React Router, TanStack Query, Recharts, Tailwind + Radix UI on the front. Express 4 and the `pg` driver on the back. Entity data lives in Postgres JSONB columns, which keeps flexible documents (parts lists, line items, timelines) without a pile of migrations while staying queryable and indexable.
 
 ## Running it
 
-Needs Node 18+. 
+For development you need Node 18+ plus a Postgres database.
 
 ```bash
 npm install
-npm run dev
+npm run server   # API on :4000, reads PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD
+npm run dev      # Vite dev server on :5173, proxies /api to :4000
 ```
 
-Dev server lands on http://localhost:5173.
+First launch walks you through creating the admin account.
 
 ## Docker
 
-Multi stage build: Vite compiles the app in node, then nginx serves the static bundle with SPA routing handled:
+The easy path. One compose file brings up Postgres and the app:
 
 ```bash
 docker compose up -d --build
 ```
 
-That serves on port 8088. No volumes needed since data is per browser. Put it behind your reverse proxy or expose the port directly for LAN use.
+App lands on port 8088. Data persists in the `garagemaster-pgdata` volume. Set `PGPASSWORD` in the environment if you want something other than the default postgres/postgres pair. Behind a reverse proxy, forward everything to port 8088 - both the SPA and the API are served from there.
 
 ## How the code is laid out
 
-* `src/api/client.js` - data layer: entity CRUD, auth, shop settings, backup/restore, cross tab broadcast
+* `server/index.js` - Express app, static file serving, SSE stream, schema bootstrap
+* `server/routes/` - auth (sessions, password flows, admin user management), generic entity CRUD, settings, backup/restore, uploads
+* `src/api/client.js` - data client the UI talks to. Same interface as the old localStorage version, just HTTP underneath
 * `src/api/entities.js` - entity exports (Customer, Vehicle, Job, Inspection, InventoryItem, Quote, Invoice, Message, Event, Notification, StockMovement)
 * `src/lib/constants.js` - shared status lists, labels and badge colors
-* `src/lib/format.js` - money and date formatting helpers
-* `src/utils/demoData.js` - demo data seeder
+* `scripts/verify-server.mjs` - end to end test suite for the API (`npm run verify:server`)
+
+## Migrating from an old install
+
+If you ran the localStorage-only version: open it, go to Settings > Data, export the backup, then use restore in the new version's Settings > Data tab. Users come over without passwords (everyone claims theirs on next sign in), which is deliberate since hashes were never exportable.

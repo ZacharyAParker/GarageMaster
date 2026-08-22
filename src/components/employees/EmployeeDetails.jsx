@@ -86,9 +86,7 @@ export default function EmployeeDetails({ employee, stats, jobs, onBack, onEdit,
   });
 
   const deleteMutation = useMutation({
-    // Deletion of a raw user record (including credential material) is a data-layer
-    // operation only - nothing from it enters UI state.
-    mutationFn: () => api.entities.User.delete(employee.id),
+    mutationFn: () => api.auth.adminDeleteUser({ userId: employee.id }),
     onSuccess: () => {
       invalidateUsers();
       setConfirmDelete(false);

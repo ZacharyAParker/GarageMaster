@@ -2,44 +2,26 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-# Install dependencies first (cached until package files change)
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
-# Copy sources and build the production bundle
 COPY . .
 RUN npm run build
 
-# ---- Runtime stage: serve static assets on nginx ----
-FROM nginx:1.27-alpine AS runtime
+# ---- Runtime stage: API server + static assets in one container ----
+FROM node:22-alpine AS runtime
+WORKDIR /app
 
-# SPA fallback + cache headers for hashed assets
-RUN rm /etc/nginx/conf.d/default.conf
-COPY <<'EOF' /etc/nginx/conf.d/app.conf
-server {
-    listen 80;
-    server_name _;
-    root /usr/share/nginx/html;
-    index index.html;
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund --omit=dev
 
-    # Hashed asset filenames are content-addressed -> cache hard
-    location /assets/ {
-        add_header Cache-Control "public, max-age=31536000, immutable";
-        try_files $uri =404;
-    }
+COPY server ./server
+COPY --from=build /app/dist ./dist
 
-    # Client-side routing fallback (Calendar, Quotes, Invoices, ...)
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-EOF
+EXPOSE 4000
 
-COPY --from=build /app/dist /usr/share/nginx/html
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD wget -qO- http://127.0.0.1:4000/api/health >/dev/null 2>&1 || exit 1
 
-EXPOSE 80
-
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1
-
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server/index.js"]

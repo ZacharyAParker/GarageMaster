@@ -6,9 +6,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
   { ignores: ['dist'] },
-  // Node-context config files at the repo root
+  // Node-context code: root configs and the server
   {
-    files: ['./*.js'],
+    files: ['./*.js', 'server/**/*.js'],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,

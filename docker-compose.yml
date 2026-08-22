@@ -1,8 +1,37 @@
 services:
-  garagemaster:
+  db:
+    image: postgres:16-alpine
+    container_name: garagemaster-db
+    environment:
+      POSTGRES_DB: garagemaster
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PGPASSWORD:-postgres}
+    volumes:
+      - garagemaster-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d garagemaster"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
     build: .
     image: garagemaster:latest
     container_name: garagemaster
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: garagemaster
+      PGUSER: postgres
+      PGPASSWORD: ${PGPASSWORD:-postgres}
+      PORT: "4000"
     ports:
-      - "8088:80"
+      - "8088:4000"
     restart: unless-stopped
+
+volumes:
+  garagemaster-pgdata:

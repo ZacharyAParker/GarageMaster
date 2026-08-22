@@ -1,5 +1,5 @@
-import {  useEffect, useRef, useState  } from "react";
-import { backup } from "@/api/entities";
+import {  useCallback, useEffect, useRef, useState  } from "react";
+import api, { backup } from "@/api/entities";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,8 +21,6 @@ import {
   FileJson, AlertCircle, CheckCircle2, Loader2,
 } from "lucide-react";
 
-const STORAGE_KEY = "garagemaster_data_v1";
-
 export default function DataManagement() {
   const fileInputRef = useRef(null);
   const [storageUsage, setStorageUsage] = useState(null); // formatted KB string
@@ -32,20 +30,26 @@ export default function DataManagement() {
   const [error, setError] = useState("");
   const [confirmText, setConfirmText] = useState("");
 
-  /** Storage estimate: character length of the raw localStorage item, in KB. */
-  const refreshUsage = () => {
+  /** Database usage from the server, formatted for display. */
+  const refreshUsage = useCallback(async () => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const size = (JSON.stringify(raw ?? "") || "").length;
-      setStorageUsage(`${(size / 1024).toFixed(1)} KB`);
+      const stats = await api.settings.getStats();
+      const kb = (stats.database_bytes || 0) / 1024;
+      const parts = [];
+      if (stats.users != null) parts.push(`${stats.users} users`);
+      const recordCount = Object.entries(stats)
+        .filter(([k]) => !['users', 'database_bytes'].includes(k))
+        .reduce((s, [, v]) => s + Number(v || 0), 0);
+      if (recordCount) parts.push(`${recordCount} records`);
+      setStorageUsage(`${kb < 1024 ? kb.toFixed(1) + ' KB' : (kb / 1024).toFixed(1) + ' MB'}${parts.length ? ' - ' + parts.join(', ') : ''}`);
     } catch {
       setStorageUsage("-");
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshUsage();
-  }, []);
+  }, [refreshUsage]);
 
   // After a successful restore the session is cleared - reload shortly after so
   // the app lands on a clean state (login screen), but let the user read counts.
@@ -103,9 +107,13 @@ export default function DataManagement() {
     setBusy(false);
   };
 
-  const resetAllData = () => {
-    localStorage.removeItem(STORAGE_KEY);
-    window.location.reload();
+  const resetAllData = async () => {
+    try {
+      await api.backup.resetAll();
+      window.location.reload();
+    } catch (err) {
+      setError(err?.message || "Failed to reset data");
+    }
   };
 
   const totalCounts = (counts) => Object.values(counts || {}).reduce((sum, n) => sum + (Number(n) || 0), 0);
