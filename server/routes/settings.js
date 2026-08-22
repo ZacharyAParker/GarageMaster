@@ -1,8 +1,10 @@
 // Shop settings: single JSONB row.
 import { Router } from 'express';
 import { pgPool, notifyChange } from '../db.js';
+import { requireUser, requireAdmin } from './auth.js';
 
 const router = Router();
+router.use(requireUser);
 
 const DEFAULTS = {
   shop_name: 'GarageMaster Shop',
@@ -19,7 +21,7 @@ router.get('/', async (_req, res) => {
   res.json({ ...DEFAULTS, ...(r.rows[0]?.payload || {}) });
 });
 
-router.put('/', async (req, res) => {
+router.put('/', requireAdmin, async (req, res) => {
   const current = await pgPool.query('SELECT payload FROM app_settings WHERE id = true');
   const merged = { ...DEFAULTS, ...(current.rows[0]?.payload || {}), ...req.body };
   await pgPool.query(
@@ -32,7 +34,7 @@ router.put('/', async (req, res) => {
 });
 
 // Shop stats for the data management screen.
-router.get('/stats', async (_req, res) => {
+router.get('/stats', requireAdmin, async (_req, res) => {
   const counts = await pgPool.query(
     `SELECT 'users' AS label, COUNT(*)::int AS n FROM users
      UNION ALL SELECT name, COUNT(*)::int FROM entities GROUP BY name`
