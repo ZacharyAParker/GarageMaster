@@ -73,7 +73,9 @@ router.get('/:name/:id', async (req, res) => {
 
 // create(data)
 router.post('/:name', async (req, res) => {
-  const data = req.body || {};
+  const data = { ...(req.body || {}) };
+  // These fields are server-owned. Clients do not get a vote.
+  for (const k of ['id', 'created_date', 'updated_date']) delete data[k];
   const id = await nextId(req.entityName.toLowerCase());
   const now = new Date().toISOString();
   const payload = { ...data, id, created_date: now, updated_date: now };
@@ -86,8 +88,12 @@ router.post('/:name', async (req, res) => {
 });
 
 // update(id, patch)
+const IMMUTABLE_FIELDS = ['id', 'created_date'];
 router.put('/:name/:id', async (req, res) => {
-  const patch = req.body || {};
+  const patch = { ...(req.body || {}) };
+  // id and created_date are immutable; updated_date is set by the server
+  for (const k of IMMUTABLE_FIELDS) delete patch[k];
+  delete patch.updated_date;
   const r = await pgPool.query(
     `UPDATE entities SET payload = jsonb_strip_nulls(payload || $3::jsonb) || jsonb_build_object('updated_date', to_jsonb(now()::text)), updated_date = now()
      WHERE name = $1 AND id = $2 RETURNING payload`,
