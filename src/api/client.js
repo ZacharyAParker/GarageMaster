@@ -5,9 +5,30 @@
 
 const API = '/api';
 
+// One-shot nonce from the server proving this client runs real JS before
+// credential endpoints accept a request. Cheap bot gate, not a captcha.
+let cachedChallenge = null;
+async function getChallenge() {
+  if (cachedChallenge) {
+    const c = cachedChallenge;
+    cachedChallenge = null;
+    return c;
+  }
+  const res = await fetch(`${API}/auth/challenge`);
+  if (!res.ok) throw new Error('Could not reach the server');
+  const data = await res.json();
+  return data.challenge;
+}
+
 async function request(path, options = {}) {
+  // Credential endpoints need a challenge header; fetch one automatically.
+  if (/^\/auth\/(login|register-first-admin)$/.test(path) && !options.headers?.['x-gm-challenge']) {
+    try {
+      options.headers = { ...options.headers, 'x-gm-challenge': await getChallenge() };
+    } catch { /* surface the login error instead */ }
+  }
   const res = await fetch(`${API}${path}`, {
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: options.body ? { 'Content-Type': 'application/json', ...options.headers } : options.headers,
     credentials: 'same-origin',
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
@@ -16,7 +37,9 @@ async function request(path, options = {}) {
   try { data = await res.json(); } catch { /* empty body */ }
   if (!res.ok) {
     const message = (data && data.error) || `Request failed (${res.status})`;
-    throw new Error(message);
+    const err = new Error(message);
+    err.status = res.status;
+    throw err;
   }
   return data;
 }

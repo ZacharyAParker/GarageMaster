@@ -4,11 +4,15 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { pgPool, nextId, notifyChange } from '../db.js';
 import { hashPassword, verifyPassword } from '../lib/crypto.js';
+import { loginLimiter, issueChallenge, requireChallenge } from '../lib/security.js';
 
 const router = Router();
 
 const SESSION_COOKIE = 'gm_session';
 const SESSION_DAYS = 30;
+
+// Bot gate: clients fetch a one-shot nonce before login/register.
+router.get('/challenge', (req, res) => issueChallenge(req, res));
 
 // ---- session helpers ----
 export async function requireUser(req, res, next) {
@@ -36,6 +40,7 @@ function setSessionCookie(res, token) {
   res.cookie(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
+    // Set COOKIE_SECURE=true behind HTTPS so the cookie never travels plaintext
     secure: process.env.COOKIE_SECURE === 'true',
     maxAge: SESSION_DAYS * 86400000,
     path: '/',
@@ -90,7 +95,7 @@ router.get('/is-setup-complete', async (_req, res) => {
   res.json(r.rows[0].n > 0);
 });
 
-router.post('/register-first-admin', async (req, res) => {
+router.post('/register-first-admin', loginLimiter, requireChallenge, async (req, res) => {
   const { full_name, email, password } = req.body || {};
   if (!password || String(password).length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
   const count = await pgPool.query('SELECT COUNT(*)::int AS n FROM users');
@@ -114,7 +119,7 @@ router.post('/register-first-admin', async (req, res) => {
   res.json({ id, ...safeUser({ payload }) });
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, requireChallenge, async (req, res) => {
   const { email, password } = req.body || {};
   const r = await pgPool.query(`SELECT id, payload FROM users WHERE lower(payload->>'email') = lower($1)`, [email || '']);
   const row = r.rows[0];
