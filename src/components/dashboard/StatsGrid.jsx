@@ -1,4 +1,4 @@
-import React from "react";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { Wrench, Car, DollarSign, AlertTriangle, Users, Package } from "lucide-react";
 

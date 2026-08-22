@@ -1,116 +1,64 @@
 # GarageMaster
 
-A self-hosted auto shop management app built with React + Vite. No external services are required—all data lives entirely in your browser's `localStorage`.
+Auto shop management app built with React + Vite. No backend, no accounts to sign up for, nothing phones home. All data lives in your browser's localStorage.
+
+I wanted a shop tracker I could actually self-host without standing up a database server, so this runs entirely client side. Open it in a browser, create the admin account on first launch, and go.
 
 ## Features
 
-* **Self-Hosted**: Runs entirely in the browser with no backend required.
-* **Local Persistence**: All data is stored under a single `localStorage` key, scoped to your browser and the domain.
-* **First-Time Setup**: A simple workflow to create the initial administrator account.
-* **Secure Authentication**: Password-based authentication using PBKDF2 (SHA-256) hashing with a per-user salt.
-* **Role-Based Permissions**: Easily restrict access to certain features with a simple `PermissionGate` component.
-* **Core Modules**: Includes Dashboard, Jobs, Customers, Vehicles, Employees, Inventory, and Inspections.
-* **Modern UI**: Built with Tailwind CSS, Radix UI, and React Query for a responsive and fast experience.
+### The daily stuff
+* **Dashboard** with live stats, active jobs, inventory alerts, a 6 month revenue trend chart and a shop pulse card (completion rate, avg turnaround, jobs waiting on approval)
+* **Work orders** with a 10 stage pipeline (intake through completed), priorities, parts pulled against inventory and full cost breakdowns. There's a labor timer per job so you can clock start/pause/stop and it bills out in quarter hour increments. Jobs get a notes timeline too so techs can leave breadcrumbs
+* **Scheduling** - month and day calendar views for appointments, dropoffs, pickups and reminders. Color coded events plus an upcoming widget on the dashboard
+* **Quotes and invoices** - quotes go draft -> sent -> accepted -> converted into an invoice. Invoices track partial payments, show aging when they're past due, print clean, and completing payment on one marks the linked job done automatically
+* **Inspections** with preset checklists (full service, pre-purchase, brake check) and automatic pass/fail rollup as you fill items in
+* **Inventory** - stock levels with low/out indicators, a full movement history per part (who moved what and why), supplier directory with value rollups, printable reorder report
 
-## Tech Stack
+### Around the shop
+* **Customers** with lifetime spend stats, job history and notes. Vehicles tracked with status, mileage, open job counts
+* **Messaging** between staff, tied to jobs
+* **Leaderboard** ranking the crew by XP from completed jobs and revenue. Quality score comes from clean inspections instead of made up ratings
+* **Reports** with KPI cards, 12 month revenue chart, work mix breakdown, mechanic performance bars, date range filters and CSV export
 
-* **Framework**: React 18, Vite 6, React Router
-* **Data Management**: `@tanstack/react-query` for data fetching and caching
-* **UI**: Tailwind CSS, Radix UI, and `lucide-react` for icons
-* **Persistence**: A small in-browser client (`src/api/client.js`) that uses `localStorage`
+### Platform
+* Runs entirely in the browser. Deploy it anywhere static files are served
+* PBKDF2 password hashing with per user salts, hashes never leave the data layer
+* Role based access - admins, managers, service advisors, mechanics, parts specialists all see different things
+* JSON backup/restore built into settings for moving between machines or just keeping backups
+* Cross tab sync, so two browsers on the same shop machine stay current with each other
+* Ctrl+K search across jobs, customers, vehicles and invoices
+* Demo data seeder on first launch if you want to click around before entering real work
+* Configurable tax rate and default labor rate used across billing
 
-## Getting Started
+## Tech stack
 
-**Prerequisites:**
-* Node.js version 18 or higher
-* npm (usually comes with Node.js)
+React 18, Vite 6, React Router, TanStack Query, Recharts, Tailwind CSS with Radix UI components, lucide icons. Persistence is a small custom localStorage client in `src/api/client.js`.
 
-**Installation and Running:**
+## Running it
 
-1.  **Clone the repository and install dependencies:**
-    ```bash
-    npm install
-    ```
+Needs Node 18+. 
 
-2.  **Start the development server:**
-    ```bash
-    npm run dev
-    ```
-    The application will now be running on your local machine.
-
-**Available Scripts:**
-* `npm run dev`: Starts the Vite development server.
-* `npm run build`: Builds the app for production to the `dist/` folder.
-* `npm run preview`: Previews the production build locally.
-* `npm run lint`: Runs ESLint to check for code quality issues.
-
-## Core Concepts
-
-### Authentication & Permissions
-
-* **First-Time Setup**: When the app detects no existing users, it will redirect you to a setup page to create the first admin account.
-* **Login**: Standard email and password login. Passwords are hashed in-browser with PBKDF2 (SHA-256, 100,000 iterations) and stored with a unique salt for each user.
-* **First-Claim Passwords**: If an admin creates a new user without a password, the first time that user logs in, they will be prompted to set their password.
-* **Session Management**: The current user's session is stored in `localStorage`. Logging out clears this data.
-* **Permissions**: Use the `<PermissionGate />` component (`src/components/permissions/PermissionGate.jsx`) to conditionally render UI elements based on user roles (e.g., show a button only for admins).
-
-### Data & Persistence
-
-All application data is stored in your browser's `localStorage` under a single key: `garagemaster_data_v1`.
-
-> **Warning:** This storage method has important limitations:
-> * Data is **local to a single browser** on a single device. It will not be shared across different browsers or devices.
-> * Using **private or incognito mode** will create a separate, temporary data store that is deleted when the session ends.
-> * **Clearing your browser's site data** will permanently delete all information stored by the app.
-
-**Backup & Restore:**
-1.  Open your browser's DevTools and navigate to the `Application` tab.
-2.  Go to `Local Storage` and select the origin where the app is hosted.
-3.  Find the key `garagemaster_data_v1`.
-4.  To **back up**, copy the entire JSON string from the value field and save it to a file.
-5.  To **restore**, paste a previously saved JSON string back into the value field for that same key.
-
-## Project Structure
-
-````
-
-src/
-├── api/          \# In-browser data client and authentication logic
-├── components/   \# UI components, organized by domain
-├── pages/        \# Route pages (Dashboard, Jobs, etc.)
-├── hooks/        \# Custom React hooks
-├── lib/          \# Utility functions and helpers
-└── main.jsx      \# App bootstrap and React Query provider
-
+```bash
+npm install
+npm run dev
 ```
 
-**Key Files:**
-* `src/api/client.js`: The core file for the `localStorage`-backed database, authentication, and data manipulation.
-* `src/pages/index.jsx`: Defines application routes and handles auth guards (redirecting to Setup/Login pages).
-* `src/components/permissions/PermissionGate.jsx`: The component used for role-based UI rendering.
+Dev server lands on http://localhost:5173.
 
-## Deployment
+## Docker
 
-The output of `npm run build` is a static site located in the `dist/` directory. You can host this folder on any static hosting provider, such as:
-* Netlify
-* Vercel
-* GitHub Pages
-* Cloudflare Pages
-* AWS S3
+Multi stage build: Vite compiles the app in node, then nginx serves the static bundle with SPA routing handled:
 
-Remember that since data is stored in `localStorage`, it is tied to the deployed domain.
-
-## Troubleshooting
-
-* **Stuck on Setup/Login page:** Make sure your browser has `localStorage` enabled for the site.
-* **Data seems "lost" after deploying or visiting again:** Confirm you are using the same domain and not in private/incognito mode. `localStorage` is scoped per-origin.
-* **How to factory-reset the app:** Open DevTools, find the key `garagemaster_data_v1` in `localStorage`, and delete it. This will trigger the first-time setup flow again.
-* **Build issues:** Make sure you are using Node.js v18+. Try deleting your `node_modules` folder and `package-lock.json` file, then run `npm install` again.
-
-## Roadmap Ideas
-
-* Optional server-backed storage (e.g., SQLite/Postgres + API) while keeping the same UI.
-* Enhanced user management features, such as an admin password reset.
-* A user-friendly import/export feature for data backup and restoration.
-* Expanded reporting and analytics dashboards.
+```bash
+docker compose up -d --build
 ```
+
+That serves on port 8088. No volumes needed since data is per browser. Put it behind your reverse proxy or expose the port directly for LAN use.
+
+## How the code is laid out
+
+* `src/api/client.js` - data layer: entity CRUD, auth, shop settings, backup/restore, cross tab broadcast
+* `src/api/entities.js` - entity exports (Customer, Vehicle, Job, Inspection, InventoryItem, Quote, Invoice, Message, Event, Notification, StockMovement)
+* `src/lib/constants.js` - shared status lists, labels and badge colors
+* `src/lib/format.js` - money and date formatting helpers
+* `src/utils/demoData.js` - demo data seeder

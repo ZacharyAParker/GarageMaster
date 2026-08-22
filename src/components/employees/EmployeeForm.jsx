@@ -1,63 +1,78 @@
 
-import React, { useState } from "react";
+import {  useState  } from "react";
 import api from "@/api/client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { X, Plus, Trash2, Upload, Star } from "lucide-react";
+import { X, Upload, AlertCircle } from "lucide-react";
+import { POSITIONS, POSITION_LABELS } from "@/lib/constants";
 
-const specialtyOptions = ['engine', 'transmission', 'brakes', 'electrical', 'diagnostics', 'bodywork', 'performance'];
-const positionOptions = ['mechanic', 'manager', 'service_advisor', 'parts_specialist', 'admin', 'customer'];
+/** Parse a comma-separated string into a clean, deduped array of tags. */
+function parseTags(value) {
+  const seen = new Set();
+  return String(value || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter((t) => {
+      if (!t) return false;
+      const key = t.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+/** Render an array field (strings or legacy objects) as a comma-separated string. */
+function tagsToText(value) {
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((t) => (typeof t === "string" ? t : t?.name || ""))
+    .filter(Boolean)
+    .join(", ");
+}
 
 export default function EmployeeForm({ employee, onClose }) {
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
-  
-  // Initialize formData based on whether an employee object is provided.
-  // If employee is null, formData will be null, and an early return will display instructions.
-  // If employee exists, we populate formData with employee data, providing defaults for potentially missing fields.
+  const [error, setError] = useState("");
+
   const [formData, setFormData] = useState(employee ? {
     phone: employee.phone || "",
     avatar_url: employee.avatar_url || "",
-    position: employee.position || "mechanic", // Default position for new users being set up
-    specialties: employee.specialties || [],
-    skill_level: employee.skill_level || 5,
-    certifications: employee.certifications || [],
-    shift_schedule: employee.shift_schedule || {
-      monday: "9:00 AM - 5:00 PM",
-      tuesday: "9:00 AM - 5:00 PM",
-      wednesday: "9:00 AM - 5:00 PM",
-      thursday: "9:00 AM - 5:00 PM",
-      friday: "9:00 AM - 5:00 PM",
-      saturday: "Off",
-      sunday: "Off"
-    },
-    hourly_rate: employee.hourly_rate || 25,
-    jobs_completed: employee.jobs_completed || 0,
-    total_hours_worked: employee.total_hours_worked || 0,
-    average_rating: employee.average_rating || 0,
-    achievements: employee.achievements || [],
-    xp_points: employee.xp_points || 0,
-    level: employee.level || 1
+    position: employee.position || "mechanic",
+    specialties: tagsToText(employee.specialties),
+    skills: tagsToText(employee.skills),
+    certifications: tagsToText(employee.certifications),
+    hourly_wage: employee.hourly_wage ?? "",
+    hire_date: employee.hire_date ? String(employee.hire_date).slice(0, 10) : "",
   } : null);
-
-  const [newCertification, setNewCertification] = useState({ name: "", issued_date: "", expires_date: "" });
 
   const mutation = useMutation({
     mutationFn: (data) => {
-      // This form is now exclusively for updating existing users.
-      // New user creation (invitation) happens elsewhere.
-  return api.entities.User.update(employee.id, data);
+      // This form is exclusively for admin updates of an existing user.
+      // New user creation happens through the Add User form (adminCreateUser).
+      const updates = {
+        phone: data.phone,
+        position: data.position,
+        specialties: parseTags(data.specialties),
+        skills: parseTags(data.skills),
+        certifications: parseTags(data.certifications),
+        hourly_wage: data.hourly_wage === "" || data.hourly_wage == null ? null : Number(data.hourly_wage),
+        hire_date: data.hire_date || null,
+      };
+      if (data.avatar_url) updates.avatar_url = data.avatar_url;
+      return api.auth.adminUpdateUser({ userId: employee.id, updates });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['users'] });
-      onClose();
-    }
+      queryClient.invalidateQueries({ queryKey: ['currentUser'] });
+      onClose?.();
+    },
+    onError: (err) => setError(err?.message || "Failed to save profile"),
   });
 
   const handleFileUpload = async (e) => {
@@ -65,52 +80,19 @@ export default function EmployeeForm({ employee, onClose }) {
     if (!file) return;
 
     setUploading(true);
-  const { file_url } = await api.integrations.Core.UploadFile({ file });
-    setFormData({ ...formData, avatar_url: file_url });
+    try {
+      const { file_url } = await api.integrations.Core.UploadFile({ file });
+      setFormData((prev) => ({ ...prev, avatar_url: file_url }));
+    } catch (err) {
+      setError("Failed to upload photo");
+    }
     setUploading(false);
-  };
-
-  const toggleSpecialty = (specialty) => {
-    const current = formData.specialties || [];
-    if (current.includes(specialty)) {
-      setFormData({ ...formData, specialties: current.filter(s => s !== specialty) });
-    } else {
-      setFormData({ ...formData, specialties: [...current, specialty] });
-    }
-  };
-
-  const addCertification = () => {
-    if (newCertification.name) {
-      setFormData({
-        ...formData,
-        certifications: [...(formData.certifications || []), newCertification]
-      });
-      setNewCertification({ name: "", issued_date: "", expires_date: "" });
-    }
-  };
-
-  const removeCertification = (index) => {
-    setFormData({
-      ...formData,
-      certifications: formData.certifications.filter((_, i) => i !== index)
-    });
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    setError("");
     mutation.mutate(formData);
-  };
-
-  const getPositionDisplay = (position) => {
-    const positionMap = {
-      'admin': 'Administrator',
-      'manager': 'Manager',
-      'mechanic': 'Mechanic',
-      'service_advisor': 'Service Advisor',
-      'parts_specialist': 'Parts Specialist',
-      'customer': 'Customer (Limited Access)'
-    };
-    return positionMap[position] || position;
   };
 
   // If no employee object is provided, display instructions for adding new employees.
@@ -131,10 +113,10 @@ export default function EmployeeForm({ employee, onClose }) {
               <strong>How to add employees:</strong>
             </p>
             <ol className="list-decimal list-inside mt-2 space-y-1 text-sm text-blue-300">
-              <li>Use the "Add User" button in the Employee Directory</li>
-              <li>Create the user's account (name, email, password, role/position)</li>
-              <li>After they log in, they'll appear here and can be assigned details</li>
-              <li>Click "Assign Position" to set their shop role and complete their profile</li>
+              <li>Use the &quot;Add User&quot; button in the Employee Directory</li>
+              <li>Create the user&apos;s account (name, email, password, role/position)</li>
+              <li>After they log in, they&apos;ll appear here and can be assigned details</li>
+              <li>Click &quot;Assign Position&quot; to set their shop role and complete their profile</li>
             </ol>
           </div>
         </CardContent>
@@ -147,7 +129,7 @@ export default function EmployeeForm({ employee, onClose }) {
       <CardHeader className="border-b border-slate-800">
         <div className="flex justify-between items-center">
           <CardTitle className="text-xl font-bold text-slate-100">
-            {employee.position ? 'Edit Employee Profile' : 'Setup Employee Profile'}
+            {employee.position ? "Edit Employee Profile" : "Setup Employee Profile"}
           </CardTitle>
           <Button variant="ghost" size="icon" onClick={onClose} className="text-slate-400 hover:text-slate-200">
             <X className="w-5 h-5" />
@@ -170,23 +152,23 @@ export default function EmployeeForm({ employee, onClose }) {
               {formData.avatar_url ? (
                 <img src={formData.avatar_url} alt="Avatar" className="w-24 h-24 rounded-full object-cover" />
               ) : (
-                <div className="w-24 h-24 bg-gradient-to-br from-blue-600 to-blue-500 rounded-full flex items-center justify-center">
+                <div className="w-24 h-24 bg-gradient-to-br from-orange-600 to-orange-500 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold text-3xl">
-                    {employee.full_name?.[0]?.toUpperCase() || '?'}
+                    {employee.full_name?.[0]?.toUpperCase() || "?"}
                   </span>
                 </div>
               )}
               <label htmlFor="avatar-upload">
-                <Button 
-                  type="button" 
-                  size="sm" 
-                  variant="outline" 
-                  disabled={uploading} 
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={uploading}
                   className="bg-slate-800 border-slate-700 text-slate-300"
                   onClick={() => document.getElementById('avatar-upload').click()}
                 >
                   <Upload className="w-3 h-3 mr-1" />
-                  {uploading ? 'Uploading...' : 'Upload Photo'}
+                  {uploading ? "Uploading..." : "Upload Photo"}
                 </Button>
               </label>
               <input
@@ -207,7 +189,6 @@ export default function EmployeeForm({ employee, onClose }) {
                   className="bg-slate-800 border-slate-700 text-slate-400 cursor-not-allowed"
                   title="Name is managed through user settings"
                 />
-                <p className="text-xs text-slate-500 mt-1">Name can be changed in user account settings</p>
               </div>
 
               <div>
@@ -221,32 +202,33 @@ export default function EmployeeForm({ employee, onClose }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label className="text-slate-300">Phone *</Label>
+              <Label className="text-slate-300">Phone</Label>
               <Input
-                required
                 type="tel"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 className="bg-slate-800 border-slate-700 text-slate-200"
+                placeholder="(555) 123-4567"
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-slate-300">Shop Position * {!employee.position && <span className="text-yellow-400">(Required)</span>}</Label>
-              <Select 
-                value={formData.position} 
+              <Label className="text-slate-300">
+                Shop Position {!employee.position && <span className="text-yellow-400">(Required)</span>}
+              </Label>
+              <Select
+                value={formData.position}
                 onValueChange={(value) => setFormData({ ...formData, position: value })}
-                required
               >
                 <SelectTrigger className="bg-slate-800 border-slate-700 text-slate-200">
                   <SelectValue placeholder="Select position..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {positionOptions.map(pos => (
-                    <SelectItem key={pos} value={pos} className="capitalize">
-                      {getPositionDisplay(pos)}
+                  {POSITIONS.map((pos) => (
+                    <SelectItem key={pos} value={pos}>
+                      {POSITION_LABELS[pos] || pos}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -255,147 +237,109 @@ export default function EmployeeForm({ employee, onClose }) {
                 <p className="text-xs text-yellow-400">This user cannot be assigned to jobs until a position is set</p>
               )}
             </div>
+
+            <div className="space-y-2">
+              <Label className="text-slate-300">Hourly Wage ($)</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.hourly_wage}
+                onChange={(e) => setFormData({ ...formData, hourly_wage: e.target.value })}
+                className="bg-slate-800 border-slate-700 text-slate-200"
+                placeholder="e.g. 25.00"
+              />
+            </div>
           </div>
 
-          {/* Only show these fields for employees with relevant positions */}
-          {['mechanic', 'manager', 'admin'].includes(formData.position) && (
-            <>
-              {/* Specialties */}
-              <div className="space-y-2">
-                <Label className="text-slate-300">Specialties</Label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Specialties */}
+            <div className="space-y-2">
+              <Label className="text-slate-300">Specialties</Label>
+              <Input
+                value={formData.specialties}
+                onChange={(e) => setFormData({ ...formData, specialties: e.target.value })}
+                className="bg-slate-800 border-slate-700 text-slate-200"
+                placeholder="Comma-separated, e.g. engine, brakes, diagnostics"
+              />
+              {parseTags(formData.specialties).length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {specialtyOptions.map((specialty) => (
-                    <Badge
-                      key={specialty}
-                      onClick={() => toggleSpecialty(specialty)}
-                      className={`cursor-pointer capitalize ${
-                        formData.specialties?.includes(specialty)
-                          ? 'bg-orange-600 text-white border-0'
-                          : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {specialty}
+                  {parseTags(formData.specialties).map((tag) => (
+                    <Badge key={tag} className="bg-orange-900/40 text-orange-300 border-orange-800">
+                      {tag}
                     </Badge>
                   ))}
                 </div>
-              </div>
+              )}
+            </div>
 
-              {/* Skill Level */}
-              <div className="space-y-2">
-                <Label className="text-slate-300">Skill Level: {formData.skill_level}/10</Label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="1"
-                    max="10"
-                    value={formData.skill_level}
-                    onChange={(e) => setFormData({ ...formData, skill_level: parseInt(e.target.value) })}
-                    className="flex-1"
-                  />
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: formData.skill_level }).map((_, i) => (
-                      <Star key={i} className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                    ))}
-                  </div>
+            {/* Skills */}
+            <div className="space-y-2">
+              <Label className="text-slate-300">Skills</Label>
+              <Input
+                value={formData.skills}
+                onChange={(e) => setFormData({ ...formData, skills: e.target.value })}
+                className="bg-slate-800 border-slate-700 text-slate-200"
+                placeholder="Comma-separated, e.g. brake repair, wheel alignment"
+              />
+              {parseTags(formData.skills).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {parseTags(formData.skills).map((tag) => (
+                    <Badge key={tag} variant="outline" className="bg-slate-800 text-slate-300 border-slate-700">
+                      {tag}
+                    </Badge>
+                  ))}
                 </div>
-              </div>
-            </>
-          )}
+              )}
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Certifications */}
             <div className="space-y-2">
-              <Label className="text-slate-300">Hourly Rate ($)</Label>
+              <Label className="text-slate-300">Certifications</Label>
               <Input
-                type="number"
-                step="0.01"
-                value={formData.hourly_rate}
-                onChange={(e) => setFormData({ ...formData, hourly_rate: parseFloat(e.target.value) })}
+                value={formData.certifications}
+                onChange={(e) => setFormData({ ...formData, certifications: e.target.value })}
                 className="bg-slate-800 border-slate-700 text-slate-200"
+                placeholder="Comma-separated, e.g. ASE Master Tech, EPA 609"
               />
-            </div>
-          </div>
-
-          {/* Certifications */}
-          <div className="space-y-3">
-            <Label className="text-slate-300">Certifications</Label>
-            <div className="space-y-2">
-              {formData.certifications?.map((cert, index) => (
-                <div key={index} className="flex items-center gap-3 p-3 bg-slate-800 rounded-lg border border-slate-700">
-                  <div className="flex-1">
-                    <p className="text-slate-200 font-medium">{cert.name}</p>
-                    <p className="text-xs text-slate-400">
-                      Issued: {cert.issued_date} {cert.expires_date && `• Expires: ${cert.expires_date}`}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => removeCertification(index)}
-                    className="text-red-400 hover:text-red-300"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+              {parseTags(formData.certifications).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {parseTags(formData.certifications).map((tag) => (
+                    <Badge key={tag} className="bg-blue-900/40 text-blue-300 border-blue-800">
+                      {tag}
+                    </Badge>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Input
-                placeholder="Certification name"
-                value={newCertification.name}
-                onChange={(e) => setNewCertification({ ...newCertification, name: e.target.value })}
-                className="bg-slate-800 border-slate-700 text-slate-200"
-              />
+
+            {/* Hire Date */}
+            <div className="space-y-2">
+              <Label className="text-slate-300">Hire Date</Label>
               <Input
                 type="date"
-                placeholder="Issued date"
-                value={newCertification.issued_date}
-                onChange={(e) => setNewCertification({ ...newCertification, issued_date: e.target.value })}
+                value={formData.hire_date}
+                onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
                 className="bg-slate-800 border-slate-700 text-slate-200"
               />
-              <div className="flex gap-2">
-                <Input
-                  type="date"
-                  placeholder="Expires date"
-                  value={newCertification.expires_date}
-                  onChange={(e) => setNewCertification({ ...newCertification, expires_date: e.target.value })}
-                  className="bg-slate-800 border-slate-700 text-slate-200"
-                />
-                <Button type="button" onClick={addCertification} size="sm" className="bg-orange-600 hover:bg-orange-500">
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
             </div>
           </div>
 
-          {/* Shift Schedule */}
-          <div className="space-y-3">
-            <Label className="text-slate-300">Weekly Schedule</Label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => (
-                <div key={day} className="flex items-center gap-3">
-                  <Label className="text-slate-400 capitalize w-24">{day}</Label>
-                  <Input
-                    value={formData.shift_schedule?.[day] || ""}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      shift_schedule: { ...formData.shift_schedule, [day]: e.target.value }
-                    })}
-                    placeholder="9:00 AM - 5:00 PM"
-                    className="bg-slate-800 border-slate-700 text-slate-200"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
+          {error && (
+            <p className="text-red-400 text-sm flex items-center gap-1">
+              <AlertCircle className="w-4 h-4" />
+              {error}
+            </p>
+          )}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
             <Button type="button" variant="outline" onClick={onClose} className="bg-slate-800 border-slate-700 text-slate-300">
               Cancel
             </Button>
             <Button type="submit" disabled={mutation.isPending} className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-400">
-              {mutation.isPending ? 'Saving...' : (employee.position ? 'Update Profile' : 'Complete Setup')}
+              {mutation.isPending ? "Saving..." : (employee.position ? "Update Profile" : "Complete Setup")}
             </Button>
           </div>
         </form>

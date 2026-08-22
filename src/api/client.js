@@ -7,7 +7,9 @@ function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch (e) {}
+  } catch (_) {
+    // Corrupt storage falls through to a fresh database.
+  }
   return { entities: {}, files: {}, currentUserId: null, seq: 1 };
 }
 
@@ -103,6 +105,116 @@ function entityAPI(name) {
 
 const entities = new Proxy({}, { get: (_t, prop) => entityAPI(String(prop)) });
 
+// ---- Cross-tab sync: notify other tabs when data changes ----
+const BROADCAST_CHANNEL = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('garagemaster_sync') : null;
+if (BROADCAST_CHANNEL) {
+  BROADCAST_CHANNEL.onmessage = () => {
+    // Any tab can re-read fresh data; pages using react-query pick it up via the
+    // queryClient invalidation in App.jsx listening to this event.
+    window.dispatchEvent(new CustomEvent('garagemaster:data-changed'));
+  };
+}
+
+// ---- Shop settings (tax rate, labor rate, shop name, address) ----
+const settingsAPI = {
+  async get() {
+    const db = loadData();
+    return db.settings || {
+      shop_name: 'GarageMaster Shop',
+      tax_rate: 0.0825,
+      default_labor_rate: 85,
+      currency: 'USD',
+      address: '',
+      phone: '',
+      email: '',
+    };
+  },
+  async set(updates) {
+    const db = loadData();
+    db.settings = { ...(db.settings || {}), ...updates };
+    saveData(db);
+    if (BROADCAST_CHANNEL) BROADCAST_CHANNEL.postMessage({ type: 'settings' });
+    return db.settings;
+  },
+};
+
+// ---- Backup / restore / export ----
+async function backupPayload() {
+  const db = loadData();
+  const users = db.entities.User || [];
+  return {
+    version: 1,
+    exported_at: new Date().toISOString(),
+    data: {
+      ...db,
+      entities: Object.fromEntries(
+        Object.entries(db.entities).map(([k, arr]) => [k, k === 'User' ? arr.map(safeUser) : arr])
+      ),
+    },
+    user_count: users.length,
+  };
+}
+
+const backupAPI = {
+  /** Download a JSON backup of all data (password hashes stripped from User records). */
+  async downloadBackup() {
+    const payload = await backupPayload();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `garagemaster-backup-${format(new Date(), 'yyyy-MM-dd-HHmm')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return { ok: true };
+  },
+  /** Return the JSON string (for copy/paste backups). */
+  async exportJson() {
+    const payload = await backupPayload();
+    return JSON.stringify(payload, null, 2);
+  },
+  /**
+   * Restore from a JSON string or parsed object produced by exportJson/downloadBackup.
+   * Users are restored WITHOUT password hashes; each must use "claim account" on login
+   * to set their password again. Returns counts.
+   */
+  async restore(json) {
+    let payload = typeof json === 'string' ? JSON.parse(json) : json;
+    if (!payload || !payload.data || !payload.data.entities) throw new Error('Invalid backup file');
+    const db = loadData();
+    db.entities = {};
+    let counts = {};
+    for (const [name, arr] of Object.entries(payload.data.entities)) {
+      db.entities[name] = arr.map((item) => {
+        if (name === 'User') {
+          const { password_hash, password_salt, ...rest } = item;
+          return rest;
+        }
+        return item;
+      });
+      counts[name] = arr.length;
+    }
+    // Restore the non-entity payload too: settings, uploaded files, id sequence.
+    if (payload.data.settings) db.settings = payload.data.settings;
+    if (payload.data.files) db.files = payload.data.files;
+    if (payload.data.seq) db.seq = Math.max(db.seq || 1, payload.data.seq);
+    db.currentUserId = null; // force re-login after restore
+    saveData(db);
+    if (BROADCAST_CHANNEL) BROADCAST_CHANNEL.postMessage({ type: 'restore' });
+    return { ok: true, counts };
+  },
+};
+
+function format(d, fmt) {
+  // Local minimal formatter to avoid importing date-fns here
+  const dt = new Date(d);
+  const pad = (n) => String(n).padStart(2, '0');
+  if (fmt === 'yyyy-MM-dd-HHmm') return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}-${pad(dt.getHours())}${pad(dt.getMinutes())}`;
+  return dt.toISOString();
+}
+
 // Password hashing using Web Crypto
 async function hashPassword(password, salt) {
   const cryptoObj = (typeof window !== 'undefined' ? window.crypto : undefined);
@@ -122,12 +234,27 @@ function b64ToBytes(b64) {
   return arr;
 }
 
+/** Strip credential material from a user record before it leaves the data layer. */
+function safeUser(user) {
+  if (!user) return null;
+  const { password_hash, password_salt, ...rest } = user;
+  return rest;
+}
+
 const auth = {
   async me() {
     const db = loadData();
     if (!db.currentUserId) return null;
     const user = getEntityArray('User').find((u) => u.id === db.currentUserId) || null;
     return user || null;
+  },
+  /**
+   * List users with credential material stripped. Use this in UI code.
+   * (Raw api.entities.User.list still exists for internal data-layer use,
+   * but pages should prefer auth.listUsers.)
+   */
+  async listUsers() {
+    return getEntityArray('User').map(safeUser);
   },
   async isSetupComplete() {
     const users = getEntityArray('User');
@@ -224,7 +351,61 @@ const auth = {
     const updated = { ...users[idx], ...updates, updated_date: new Date().toISOString() };
     users[idx] = updated;
     setEntityArray('User', users);
-    return updated;
+    return safeUser(updated);
+  },
+
+  /** Change the current user's password (requires current password). */
+  async changePassword({ currentPassword, newPassword }) {
+    const db = loadData();
+    if (!db.currentUserId) throw new Error('Not signed in');
+    const users = getEntityArray('User');
+    const idx = users.findIndex((u) => u.id === db.currentUserId);
+    if (idx === -1) throw new Error('Not signed in');
+    const user = users[idx];
+    if (user.password_hash && user.password_salt) {
+      const { hash } = await hashPassword(currentPassword, b64ToBytes(user.password_salt));
+      if (hash !== user.password_hash) throw new Error('Current password is incorrect');
+    }
+    if (!newPassword || String(newPassword).length < 6) throw new Error('New password must be at least 6 characters');
+    const { hash, salt } = await hashPassword(newPassword);
+    users[idx] = { ...user, password_hash: hash, password_salt: salt, updated_date: new Date().toISOString() };
+    setEntityArray('User', users);
+    return { ok: true };
+  },
+
+  /**
+   * Admin resets a user's password to a temporary one. The target account's next
+   * login with that temp password claims it (first-claim flow in login()).
+   */
+  async adminResetPassword({ userId, newPassword }) {
+    const db = loadData();
+    const me = getEntityArray('User').find((u) => u.id === db.currentUserId);
+    if (!me || me.role !== 'admin') throw new Error('Admin privileges required');
+    const users = getEntityArray('User');
+    const idx = users.findIndex((u) => u.id === userId);
+    if (idx === -1) throw new Error('User not found');
+    if (!newPassword || String(newPassword).length < 6) throw new Error('Password must be at least 6 characters');
+    const { hash, salt } = await hashPassword(newPassword);
+    users[idx] = { ...users[idx], password_hash: hash, password_salt: salt, updated_date: new Date().toISOString() };
+    setEntityArray('User', users);
+    return safeUser(users[idx]);
+  },
+
+  /** Admin sets a user's role/position and other profile fields. */
+  async adminUpdateUser({ userId, updates }) {
+    const db = loadData();
+    const me = getEntityArray('User').find((u) => u.id === db.currentUserId);
+    if (!me || me.role !== 'admin') throw new Error('Admin privileges required');
+    const users = getEntityArray('User');
+    const idx = users.findIndex((u) => u.id === userId);
+    if (idx === -1) throw new Error('User not found');
+    const allowed = {};
+    for (const k of ['full_name', 'email', 'role', 'position', 'phone', 'specialties', 'skills', 'certifications', 'hourly_wage', 'hire_date', 'avatar_url', 'jobs_completed', 'xp_points']) {
+      if (k in updates) allowed[k] = updates[k];
+    }
+    users[idx] = { ...users[idx], ...allowed, updated_date: new Date().toISOString() };
+    setEntityArray('User', users);
+    return safeUser(users[idx]);
   },
 };
 
@@ -267,5 +448,5 @@ const integrations = {
   },
 };
 
-export const api = { entities, auth, integrations };
+export const api = { entities, auth, integrations, settings: settingsAPI, backup: backupAPI };
 export default api;

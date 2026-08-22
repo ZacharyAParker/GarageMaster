@@ -1,8 +1,8 @@
-import React from "react";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle, AlertTriangle, AlertCircle, Car } from "lucide-react";
+import { ArrowLeft, CheckCircle, AlertTriangle, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 
 export default function InspectionDetails({ inspection, job, vehicle, onBack }) {

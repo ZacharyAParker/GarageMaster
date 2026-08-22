@@ -1,9 +1,9 @@
-import React, { useState } from "react";
+
 import api from "@/api/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Bell, Check, X, Wrench, MessageSquare, Package, FileCheck, AlertCircle } from "lucide-react";
+
+import { Bell, Check, Wrench, MessageSquare, Package, FileCheck, AlertCircle } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,

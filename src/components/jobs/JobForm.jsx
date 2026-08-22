@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { X, Plus, Trash2, Package } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
-export default function JobForm({ job, preselectedVehicleId, vehicles, customers, employees, onClose }) {
+export default function JobForm({ job, preselectedVehicleId, vehicles, employees, onClose }) {
   const queryClient = useQueryClient();
   const [formData, setFormData] = useState(job || {
     vehicle_id: preselectedVehicleId || "",
@@ -31,16 +31,8 @@ export default function JobForm({ job, preselectedVehicleId, vehicles, customers
   });
 
   const createPageUrl = (pageName) => {
-    // This is a placeholder function for generating URLs.
-    // In a real application, this would typically integrate with your router (e.g., Next.js, React Router).
-    switch (pageName) {
-      case "Jobs":
-        return "/app/jobs"; // Example path for jobs page
-      case "Settings":
-        return "/app/settings"; // Example path for settings page
-      default:
-        return "/app"; // Default path
-    }
+    // Match the app's real route format: /<PageName>
+    return '/' + pageName.toLowerCase().replace(/ /g, '-');
   };
 
   const { data: inventory = [] } = useQuery({

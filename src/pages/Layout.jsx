@@ -1,6 +1,5 @@
 
 
-import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -12,13 +11,14 @@ import {
   Wrench,
   Package,
   MessageSquare,
-  Settings,
+  Settings as SettingsIcon,
   Trophy,
   UserCog,
-  Menu,
-  Bell,
-  Search,
   ClipboardCheck,
+  CalendarDays,
+  FileText,
+  Receipt,
+  BarChart3,
 } from "lucide-react";
 import {
   Sidebar,
@@ -36,19 +36,24 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+
 import NotificationBell from "../components/notifications/NotificationBell";
+import GlobalSearch from "@/components/search/GlobalSearch";
 
 const navigationItems = [
   { title: "Dashboard", url: createPageUrl("Dashboard"), icon: LayoutDashboard, showAlways: true },
+  { title: "Calendar", url: createPageUrl("Calendar"), icon: CalendarDays, requirePosition: true, blockCustomers: false },
   { title: "Customers", url: createPageUrl("Customers"), icon: Users, requirePosition: true, blockCustomers: true },
   { title: "Vehicles", url: createPageUrl("Vehicles"), icon: Car, requirePosition: true, blockCustomers: true },
   { title: "Jobs", url: createPageUrl("Jobs"), icon: Wrench, requirePosition: true, blockCustomers: true },
   { title: "Inspections", url: createPageUrl("Inspections"), icon: ClipboardCheck, requirePosition: true, blockCustomers: true },
+  { title: "Quotes", url: createPageUrl("Quotes"), icon: FileText, requirePosition: true, blockCustomers: true },
+  { title: "Invoices", url: createPageUrl("Invoices"), icon: Receipt, requirePosition: true, blockCustomers: true },
   { title: "Employees", url: createPageUrl("Employees"), icon: UserCog, showToEmployees: true, blockCustomers: true }, // Show to all employees
   { title: "Inventory", url: createPageUrl("Inventory"), icon: Package, showAlways: true }, // Everyone can view
   { title: "Messages", url: createPageUrl("Messages"), icon: MessageSquare, requirePosition: true, blockCustomers: true },
   { title: "Leaderboard", url: createPageUrl("Leaderboard"), icon: Trophy, requirePosition: true, blockCustomers: true },
+  { title: "Reports", url: createPageUrl("Reports"), icon: BarChart3, requirePosition: true, blockCustomers: true },
 ];
 
 export default function Layout({ children }) {
@@ -85,11 +90,6 @@ export default function Layout({ children }) {
   const getUserLevel = () => {
     if (!currentUser) return 1;
     return currentUser.level || Math.floor((currentUser.xp_points || 0) / 1000) + 1;
-  };
-
-  const getUserJobCount = () => {
-    if (!currentUser) return 0;
-    return currentUser.jobs_completed || 0;
   };
 
   const getPositionDisplay = (position) => {
@@ -137,8 +137,8 @@ export default function Layout({ children }) {
                 <Wrench className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="font-bold text-slate-100 text-lg">GarageSim</h2>
-                <p className="text-xs text-slate-500">CRM Pro</p>
+                <h2 className="font-bold text-slate-100 text-lg">GarageMaster</h2>
+                <p className="text-xs text-slate-500">Shop Management Pro</p>
               </div>
             </div>
           </SidebarHeader>
@@ -277,22 +277,13 @@ export default function Layout({ children }) {
           <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <SidebarTrigger className="lg:hidden hover:bg-slate-800 p-2 rounded-lg transition-colors text-slate-400" />
-              {userHasPosition && !isCustomer && (
-                <div className="hidden md:flex items-center gap-2 bg-slate-800 rounded-lg px-4 py-2 w-96 border border-slate-700">
-                  <Search className="w-4 h-4 text-slate-500" />
-                  <input
-                    type="text"
-                    placeholder="Search jobs, customers, vehicles..."
-                    className="bg-transparent outline-none text-sm text-slate-300 placeholder-slate-500 w-full"
-                  />
-                </div>
-              )}
+              {userHasPosition && !isCustomer && <GlobalSearch />}
             </div>
             <div className="flex items-center gap-3">
               {userHasPosition && !isCustomer && <NotificationBell />}
               <Link to={createPageUrl("Settings")}>
                 <Button variant="ghost" size="icon" className="hover:bg-slate-800">
-                  <Settings className="w-5 h-5 text-slate-400" />
+                  <SettingsIcon className="w-5 h-5 text-slate-400" />
                 </Button>
               </Link>
             </div>

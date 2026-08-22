@@ -1,40 +1,75 @@
 
-import React, { useState } from "react";
+import {  useMemo, useState  } from "react";
 import api from "@/api/client";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Users, Trophy, Wrench, Star, TrendingUp, Edit, Eye, Plus, AlertCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Users, Trophy, Star, TrendingUp, Plus, AlertCircle, Search } from "lucide-react";
+import { POSITION_LABELS } from "@/lib/constants";
 
 import EmployeeCard from "../components/employees/EmployeeCard";
 import EmployeeForm from "../components/employees/EmployeeForm";
 import EmployeeDetails from "../components/employees/EmployeeDetails";
 import AddUserForm from "../components/employees/AddUserForm";
-// Removed PermissionGate import as it's no longer used directly in this file
-// import PermissionGate from "../components/permissions/PermissionGate";
+
+// Positions offered in the filter dropdown (the directory excludes customers).
+const FILTER_POSITIONS = ["admin", "manager", "service_advisor", "mechanic", "parts_specialist"];
 
 export default function Employees() {
   const [showForm, setShowForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [addingUser, setAddingUser] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
-  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [positionFilter, setPositionFilter] = useState("all");
 
   const { data: currentUser } = useQuery({
     queryKey: ['currentUser'],
-  queryFn: () => api.auth.me()
+    queryFn: () => api.auth.me()
   });
 
+  // Safe user listing: auth.listUsers() strips password hashes/credential
+  // material. Raw User entity records must never be pulled into UI state.
   const { data: employees = [], isLoading } = useQuery({
     queryKey: ['users'],
-  queryFn: () => api.entities.User.list()
+    queryFn: () => api.auth.listUsers()
   });
 
   const { data: jobs = [] } = useQuery({
     queryKey: ['jobs'],
-  queryFn: () => api.entities.Job.list()
+    queryFn: () => api.entities.Job.list()
   });
+
+  // Filter out customers from employee list - only show actual shop employees
+  const shopEmployees = employees.filter(e => e.position !== 'customer');
+
+  // Show ALL users - those with positions AND those without (pending setup)
+  const allEmployees = shopEmployees;
+
+  // Separate employees with positions (active) from those without (pending setup)
+  const activeEmployees = shopEmployees.filter(e => e.position);
+  const pendingEmployees = shopEmployees.filter(e => !e.position);
+
+  // Search + position filtering for the card grid
+  const filteredEmployees = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return activeEmployees.filter((e) => {
+      if (positionFilter !== 'all' && e.position !== positionFilter) return false;
+      if (!q) return true;
+      const haystack = [
+        e.full_name,
+        e.email,
+        e.phone,
+        POSITION_LABELS[e.position] || '',
+        ...(Array.isArray(e.specialties) ? e.specialties : []),
+        ...(Array.isArray(e.skills) ? e.skills : []),
+      ].join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [activeEmployees, search, positionFilter]);
 
   // Only customers are blocked from viewing employee directory
   if (currentUser?.position === 'customer') {
@@ -43,28 +78,18 @@ export default function Employees() {
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-12 text-center">
             <Users className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-            <p className="text-slate-400 text-lg">You don't have access to the employee directory.</p>
+            <p className="text-slate-400 text-lg">You don&apos;t have access to the employee directory.</p>
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  // Filter out customers from employee list - only show actual shop employees
-  const shopEmployees = employees.filter(e => e.position !== 'customer');
-  
-  // Show ALL users - those with positions AND those without (pending setup)
-  const allEmployees = shopEmployees;
-  
-  // Separate employees with positions (active) from those without (pending setup)
-  const activeEmployees = shopEmployees.filter(e => e.position);
-  const pendingEmployees = shopEmployees.filter(e => !e.position);
-  
   const getEmployeeStats = (employeeId) => {
     const employeeJobs = jobs.filter(j => j.assigned_mechanic_id === employeeId);
     const completedJobs = employeeJobs.filter(j => j.status === 'completed');
     const activeJobs = employeeJobs.filter(j => !['completed', 'cancelled'].includes(j.status));
-    
+
     return {
       totalJobs: employeeJobs.length,
       completedJobs: completedJobs.length,
@@ -81,9 +106,13 @@ export default function Employees() {
     return top;
   }, null);
 
-  // Admins OR anyone with manager/admin position can edit
+  // Admins OR anyone with manager/admin position can edit profiles
   const canEdit = currentUser?.role === 'admin' || ['admin', 'manager'].includes(currentUser?.position);
+  // Only role==='admin' gets account management actions (reset password, role/position, delete)
+  const isAdmin = currentUser?.role === 'admin';
 
+  // From the card grid / list view: clear any selection and show the editor on top
+  // of the list. Closing it returns to the list.
   const handleEdit = (employee) => {
     if (!canEdit) {
       alert("Only administrators and managers can edit employee profiles.");
@@ -95,24 +124,41 @@ export default function Employees() {
   };
 
   const handleView = (employee) => {
-    if (!employee.position) {
-      alert("This user hasn't been assigned a position yet.");
-      return;
-    }
     setSelectedEmployee(employee);
     setShowForm(false);
   };
 
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingEmployee(null);
+  };
+
+  // Detail view: the edit form swaps in for the same employee's details,
+  // so closing the form drops you right back on their profile.
   if (selectedEmployee) {
     return (
-      <EmployeeDetails
-        employee={selectedEmployee}
-        stats={getEmployeeStats(selectedEmployee.id)}
-        jobs={jobs.filter(j => j.assigned_mechanic_id === selectedEmployee.id)}
-        onBack={() => setSelectedEmployee(null)}
-        onEdit={() => handleEdit(selectedEmployee)}
-        canEdit={canEdit}
-      />
+      <div className="min-h-screen bg-slate-950">
+        {showForm && canEdit && (
+          <div className="p-6 pb-0">
+            <EmployeeForm employee={editingEmployee} onClose={closeForm} />
+          </div>
+        )}
+        {!showForm && (
+          <EmployeeDetails
+            employee={selectedEmployee}
+            stats={getEmployeeStats(selectedEmployee.id)}
+            jobs={jobs.filter(j => j.assigned_mechanic_id === selectedEmployee.id)}
+            onBack={() => setSelectedEmployee(null)}
+            onEdit={() => {
+              setEditingEmployee(selectedEmployee);
+              setShowForm(true);
+            }}
+            canEdit={canEdit}
+            isAdmin={isAdmin}
+            currentUser={currentUser}
+          />
+        )}
+      </div>
     );
   }
 
@@ -143,10 +189,7 @@ export default function Employees() {
       {showForm && canEdit && (
         <EmployeeForm
           employee={editingEmployee}
-          onClose={() => {
-            setShowForm(false);
-            setEditingEmployee(null);
-          }}
+          onClose={closeForm}
         />
       )}
 
@@ -167,7 +210,7 @@ export default function Employees() {
                     <Button
                       key={emp.id}
                       size="sm"
-                      onClick={() => handleEdit(emp)}
+                      onClick={() => handleView(emp)}
                       className="bg-yellow-600 hover:bg-yellow-500 text-white"
                     >
                       Setup User #{index + 1}
@@ -202,27 +245,55 @@ export default function Employees() {
 
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader className="border-b border-slate-800">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-4">
             <CardTitle className="text-xl font-bold text-slate-100 flex items-center gap-2">
               <Users className="w-6 h-6" />
               Team Members ({activeEmployees.length} Active{pendingEmployees.length > 0 ? `, ${pendingEmployees.length} Pending` : ''})
             </CardTitle>
+            {/* Search + position filter */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <Input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search name, email, specialty..."
+                  className="pl-9 bg-slate-800 border-slate-700 text-slate-200 placeholder:text-slate-500"
+                />
+              </div>
+              <Select value={positionFilter} onValueChange={setPositionFilter}>
+                <SelectTrigger className="w-full sm:w-48 bg-slate-800 border-slate-700 text-slate-200">
+                  <SelectValue placeholder="All Positions" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Positions</SelectItem>
+                  {FILTER_POSITIONS.map((pos) => (
+                    <SelectItem key={pos} value={pos}>
+                      {POSITION_LABELS[pos] || pos}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-6">
           {isLoading ? (
             <div className="text-center py-12 text-slate-500">Loading employees...</div>
-          ) : activeEmployees.length === 0 ? (
+          ) : filteredEmployees.length === 0 ? (
             <div className="text-center py-12">
               <Users className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-              <p className="text-slate-500">No employees found</p>
+              <p className="text-slate-500">
+                {activeEmployees.length === 0 ? 'No employees found' : 'No employees match your search or filter'}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {activeEmployees.map((employee) => (
-                <EmployeeCard 
-                  key={employee.id} 
-                  employee={employee} 
+              {filteredEmployees.map((employee) => (
+                <EmployeeCard
+                  key={employee.id}
+                  employee={employee}
                   stats={getEmployeeStats(employee.id)}
                   isTopPerformer={topPerformer?.id === employee.id}
                   onView={() => handleView(employee)}

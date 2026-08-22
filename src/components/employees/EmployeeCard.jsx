@@ -1,23 +1,22 @@
 
-import React from "react";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Wrench, Star, CheckCircle, Clock, DollarSign, Trophy, Edit, Eye } from "lucide-react";
+import { Wrench, Clock, DollarSign, Trophy, Zap, Edit, Eye } from "lucide-react";
+import { POSITION_LABELS } from "@/lib/constants";
+import { initials } from "@/lib/format";
+
+/** XP level derived from stored xp_points (1000 XP per level). */
+function xpLevel(user) {
+  if (!user) return 1;
+  return Math.floor((user.xp_points || 0) / 1000) + 1;
+}
 
 export default function EmployeeCard({ employee, stats, isTopPerformer, onView, onEdit, canEdit }) {
-  const getRoleDisplay = (position) => {
-    const roleMap = {
-      'admin': 'Administrator',
-      'manager': 'Manager',
-      'mechanic': 'Mechanic',
-      'service_advisor': 'Service Advisor',
-      'parts_specialist': 'Parts Specialist',
-      'customer': 'Customer'
-    };
-    // Default to 'Mechanic' or the raw role if not found, but prefer mapped value.
-    return roleMap[position] || (position ? position.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') : 'Mechanic');
-  };
+  const positionLabel = POSITION_LABELS[employee.position] || "Pending Setup";
+  const level = xpLevel(employee);
+  const completedJobs = employee.jobs_completed ?? stats?.completedJobs ?? 0;
 
   return (
     <Card className={`${isTopPerformer ? 'bg-gradient-to-br from-orange-900/30 to-orange-800/20 border-orange-700' : 'bg-slate-800/50 border-slate-700'} transition-all duration-200 hover:border-orange-600`}>
@@ -27,9 +26,9 @@ export default function EmployeeCard({ employee, stats, isTopPerformer, onView, 
             {employee.avatar_url ? (
               <img src={employee.avatar_url} alt={employee.full_name} className="w-14 h-14 rounded-full object-cover" />
             ) : (
-              <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-blue-500 rounded-full flex items-center justify-center">
+              <div className="w-14 h-14 bg-gradient-to-br from-orange-600 to-orange-500 rounded-full flex items-center justify-center">
                 <span className="text-white font-bold text-xl">
-                  {employee.full_name?.[0]?.toUpperCase()}
+                  {initials(employee.full_name)}
                 </span>
               </div>
             )}
@@ -38,9 +37,18 @@ export default function EmployeeCard({ employee, stats, isTopPerformer, onView, 
                 <h3 className="font-semibold text-slate-200">{employee.full_name}</h3>
                 {isTopPerformer && <Trophy className="w-4 h-4 text-yellow-400 fill-yellow-400" />}
               </div>
-              {/* Updated to use employee.role and getRoleDisplay */}
-              <p className="text-sm text-slate-400">{getRoleDisplay(employee.role)}</p>
+              {/* Position badge from the central label contract */}
+              <Badge className="mt-1 bg-orange-900/40 text-orange-300 border-orange-800">
+                {positionLabel}
+              </Badge>
             </div>
+          </div>
+          <div className="flex flex-col items-end gap-1 text-right">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/70 border border-yellow-700/50 text-xs font-bold text-yellow-400">
+              <Zap className="w-3 h-3" />
+              Lv. {level}
+            </span>
+            <span className="text-xs text-slate-500">{employee.xp_points || 0} XP</span>
           </div>
         </div>
 
@@ -57,10 +65,10 @@ export default function EmployeeCard({ employee, stats, isTopPerformer, onView, 
         <div className="grid grid-cols-2 gap-3">
           <div className="p-3 bg-slate-900/50 rounded-lg">
             <div className="flex items-center gap-2 mb-1">
-              <CheckCircle className="w-4 h-4 text-green-400" />
-              <span className="text-xs text-slate-400">Completed</span>
+              <Wrench className="w-4 h-4 text-green-400" />
+              <span className="text-xs text-slate-400">Jobs Completed</span>
             </div>
-            <p className="text-xl font-bold text-slate-100">{stats.completedJobs}</p>
+            <p className="text-xl font-bold text-slate-100">{completedJobs}</p>
           </div>
 
           <div className="p-3 bg-slate-900/50 rounded-lg">
@@ -68,7 +76,7 @@ export default function EmployeeCard({ employee, stats, isTopPerformer, onView, 
               <Clock className="w-4 h-4 text-orange-400" />
               <span className="text-xs text-slate-400">Active</span>
             </div>
-            <p className="text-xl font-bold text-slate-100">{stats.activeJobs}</p>
+            <p className="text-xl font-bold text-slate-100">{stats?.activeJobs ?? 0}</p>
           </div>
 
           <div className="p-3 bg-slate-900/50 rounded-lg col-span-2">
@@ -76,23 +84,14 @@ export default function EmployeeCard({ employee, stats, isTopPerformer, onView, 
               <DollarSign className="w-4 h-4 text-green-400" />
               <span className="text-xs text-slate-400">Total Revenue</span>
             </div>
-            <p className="text-xl font-bold text-green-400">${stats.totalRevenue.toLocaleString()}</p>
+            <p className="text-xl font-bold text-green-400">${(stats?.totalRevenue ?? 0).toLocaleString()}</p>
           </div>
         </div>
 
-        {employee.skill_level && (
-          <div className="mt-4 pt-4 border-t border-slate-700">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">Skill Level</span>
-              <div className="flex items-center gap-1">
-                {Array.from({ length: employee.skill_level }).map((_, i) => (
-                  <Star key={i} className="w-3 h-3 text-yellow-400 fill-yellow-400" />
-                ))}
-                {Array.from({ length: 10 - employee.skill_level }).map((_, i) => (
-                  <Star key={i} className="w-3 h-3 text-slate-700" />
-                ))}
-              </div>
-            </div>
+        {employee.hourly_wage != null && (
+          <div className="mt-4 pt-4 border-t border-slate-700 flex items-center justify-between">
+            <span className="text-xs text-slate-400">Hourly Wage</span>
+            <span className="text-sm font-semibold text-slate-200">${Number(employee.hourly_wage).toFixed(2)}/hr</span>
           </div>
         )}
 

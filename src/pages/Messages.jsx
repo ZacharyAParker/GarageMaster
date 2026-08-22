@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import {  useState  } from "react";
 import api from "@/api/client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +26,7 @@ export default function Messages() {
 
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
-  queryFn: () => api.entities.User.list()
+  queryFn: () => api.auth.listUsers()
   });
 
   const { data: jobs = [] } = useQuery({

@@ -3,13 +3,106 @@ import React, { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Edit, Car, User, Wrench, Clock, DollarSign, Package, Plus, Trash2, CheckCircle, CreditCard } from "lucide-react";
+import { ArrowLeft, Edit, Car, User, Wrench, Clock, DollarSign, Package, Plus, Trash2, CheckCircle, CreditCard, ChevronRight, Ban } from "lucide-react";
 import { format } from "date-fns";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import api from "@/api/client";
 import { Input } from "@/components/ui/input";
+import { JOB_STATUSES, JOB_STATUS_LABELS } from "@/lib/constants";
 
 import PaymentModal from "./PaymentModal";
+import LaborTimer from "./LaborTimer";
+import JobNotesTimeline from "./JobNotesTimeline";
+
+// Horizontal progress stepper across the full job status flow.
+function StatusFlowBar({ job, onAdvance, onCancel, pending }) {
+  const currentIndex = JOB_STATUSES.indexOf(job.status);
+  const nextStatus =
+    currentIndex >= 0 && currentIndex < JOB_STATUSES.length - 1
+      ? JOB_STATUSES[currentIndex + 1]
+      : null;
+  const isTerminal = job.status === 'completed' || job.status === 'cancelled';
+  const isCancelledJob = job.status === 'cancelled';
+
+  return (
+    <Card className="bg-slate-900 border-slate-800">
+      <CardContent className="p-4 space-y-4">
+        <div className="flex items-center overflow-x-auto py-1">
+          {JOB_STATUSES.map((status, i) => {
+            const isCurrent = status === job.status;
+            const isCurrentCancelled = isCancelledJob && isCurrent;
+            const isPast = !isCancelledJob && currentIndex >= 0 && i < currentIndex;
+
+            let dotClass = "bg-slate-800 border-slate-600";
+            let labelClass = "text-slate-500";
+            if (isCurrentCancelled) {
+              dotClass = "bg-red-600 border-red-400 ring-4 ring-red-500/20";
+              labelClass = "text-red-300 font-semibold";
+            } else if (isCurrent) {
+              dotClass = "bg-orange-500 border-orange-300 ring-4 ring-orange-500/20";
+              labelClass = "text-orange-300 font-semibold";
+            } else if (isPast) {
+              dotClass = "bg-emerald-500 border-emerald-400";
+              labelClass = "text-slate-400";
+            }
+
+            return (
+              <React.Fragment key={status}>
+                <div className="flex flex-col items-center gap-1.5 min-w-[80px] shrink-0">
+                  <span className={`w-3 h-3 rounded-full border-2 ${dotClass}`} />
+                  <span className={`text-[10px] leading-tight text-center ${labelClass}`}>
+                    {JOB_STATUS_LABELS[status]}
+                  </span>
+                </div>
+                {i < JOB_STATUSES.length - 1 && (
+                  <div
+                    className={`h-0.5 w-8 mx-1 rounded shrink-0 ${
+                      isPast ? "bg-emerald-500/60" : "bg-slate-700"
+                    }`}
+                  />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        {!isTerminal && (
+          <div className="flex flex-wrap gap-2 pt-3 border-t border-slate-800">
+            <Button
+              size="sm"
+              onClick={onAdvance}
+              disabled={pending || !nextStatus}
+              className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-400"
+            >
+              <ChevronRight className="w-4 h-4 mr-1" />
+              {pending
+                ? "Updating..."
+                : nextStatus
+                ? `Advance to ${JOB_STATUS_LABELS[nextStatus]}`
+                : "End of Flow"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={onCancel}
+              disabled={pending}
+              className="border-red-800 text-red-400 hover:bg-red-900/30 hover:text-red-300 bg-transparent"
+            >
+              <Ban className="w-4 h-4 mr-1" />
+              Cancel Job
+            </Button>
+          </div>
+        )}
+
+        {job.completed_date && (
+          <p className="text-xs text-emerald-400 pt-3 border-t border-slate-800">
+            Completed {format(new Date(job.completed_date), "MMM d, yyyy h:mm a")}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function JobDetails({ jobId, onBack, onEdit }) {
   const queryClient = useQueryClient();
@@ -51,7 +144,7 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['users'],
-  queryFn: () => api.entities.User.list(),
+  queryFn: () => api.auth.listUsers(),
     enabled: !!jobId
   });
 
@@ -77,17 +170,53 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
     }
   });
 
-  const completeJobMutation = useMutation({
-    mutationFn: async () => {
-  return api.entities.Job.update(job.id, {
-        status: 'completed',
-        actual_completion: new Date().toISOString()
-      });
+  // Unified status transition mutation: advances or cancels the job status,
+  // records completion side effects, and persists any running labor timer first.
+  const statusMutation = useMutation({
+    mutationFn: async ({ status }) => {
+      const nowIso = new Date().toISOString();
+      const patch = { status };
+
+      // Persist a running timer so tracked time isn't lost on a status change.
+      if (job.timer_started_at) {
+        const runSeconds = Math.max(
+          0,
+          Math.floor((Date.now() - new Date(job.timer_started_at).getTime()) / 1000)
+        );
+        patch.timer_started_at = null;
+        patch.accumulated_seconds = (Number(job.accumulated_seconds) || 0) + runSeconds;
+      }
+
+      if (status === 'completed') {
+        patch.completed_date = nowIso;
+        patch.actual_completion = nowIso; // kept for backward compatibility
+      }
+
+      const updated = await api.entities.Job.update(job.id, patch);
+
+      // Completing credits the assigned mechanic's jobs_completed counter.
+      // adminUpdateUser throws for non-admins, hence the try/catch.
+      if (status === 'completed' && job.assigned_mechanic_id) {
+        try {
+          const users = await api.auth.listUsers();
+          const mechanicUser = users.find((u) => u.id === job.assigned_mechanic_id);
+          if (mechanicUser) {
+            await api.auth.adminUpdateUser({
+              userId: mechanicUser.id,
+              updates: { jobs_completed: (mechanicUser.jobs_completed || 0) + 1 },
+            });
+          }
+        } catch (err) {
+          console.warn('Could not update mechanic completion stats:', err?.message || err);
+        }
+      }
+
+      return updated;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['jobs'] });
       queryClient.invalidateQueries({ queryKey: ['job', jobId] });
-      alert('Job marked as completed!');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     }
   });
 
@@ -214,6 +343,7 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
       updateJobMutation.mutate({
         parts_used: updatedParts,
         total_parts_cost: partsTotal,
+        total_labor_cost: laborTotal,
         total_cost: partsTotal + laborTotal
       });
 
@@ -243,13 +373,31 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
     updateJobMutation.mutate({
       parts_used: updatedParts,
       total_parts_cost: partsTotal,
+      total_labor_cost: laborTotal,
       total_cost: partsTotal + laborTotal
     });
   };
 
+  const handleAdvanceStatus = () => {
+    const idx = JOB_STATUSES.indexOf(job.status);
+    const nextStatus = idx >= 0 && idx < JOB_STATUSES.length - 1 ? JOB_STATUSES[idx + 1] : null;
+    if (!nextStatus) return;
+    if (nextStatus === 'completed') {
+      if (!confirm('Mark this job as completed? This records the completion date and credits the assigned mechanic.')) return;
+    } else if (!confirm(`Advance this job to "${JOB_STATUS_LABELS[nextStatus]}"?`)) {
+      return;
+    }
+    statusMutation.mutate({ status: nextStatus });
+  };
+
+  const handleCancelJob = () => {
+    if (!confirm('Cancel this job? This cannot be undone.')) return;
+    statusMutation.mutate({ status: 'cancelled' });
+  };
+
   const handleCompleteJob = () => {
-    if (confirm('Are you sure you want to mark this job as completed?')) {
-      completeJobMutation.mutate();
+    if (confirm('Mark this job as completed? This records the completion date and credits the assigned mechanic.')) {
+      statusMutation.mutate({ status: 'completed' });
     }
   };
 
@@ -319,11 +467,11 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
           {job.status !== 'completed' && (
             <Button
               onClick={handleCompleteJob}
-              disabled={completeJobMutation.isPending}
+              disabled={statusMutation.isPending}
               className="bg-green-600 hover:bg-green-500"
             >
               <CheckCircle className="w-4 h-4 mr-2" />
-              {completeJobMutation.isPending ? 'Completing...' : 'Complete Job'}
+              {statusMutation.isPending ? 'Completing...' : 'Complete Job'}
             </Button>
           )}
           <Button onClick={() => onEdit(job)} className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-400">
@@ -332,6 +480,14 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
           </Button>
         </div>
       </div>
+
+      {/* Status Flow */}
+      <StatusFlowBar
+        job={job}
+        onAdvance={handleAdvanceStatus}
+        onCancel={handleCancelJob}
+        pending={statusMutation.isPending}
+      />
 
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="bg-slate-900 border-slate-800">
@@ -462,6 +618,9 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
             </Card>
           )}
 
+          {/* Labor Timer (only shown for in_progress / waiting_for_parts / quality_check) */}
+          <LaborTimer job={job} />
+
           {/* Parts Used */}
           <Card className="bg-slate-900 border-slate-800">
             <CardHeader className="border-b border-slate-800">
@@ -551,7 +710,7 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
                   )}
 
                   <div className="text-center text-xs text-slate-500">
-                    — OR ENTER MANUALLY —
+                    - OR ENTER MANUALLY -
                   </div>
 
                   {/* Manual entry fields */}
@@ -698,7 +857,7 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
                   <span className="text-slate-300">Labor</span>
                 </div>
                 <span className="text-slate-100 font-semibold">
-                  {job.labor_hours || 0} hrs × ${job.labor_rate || 85} = ${((job.labor_hours || 0) * (job.labor_rate || 85)).toFixed(2)}
+                  {job.labor_hours || 0} hrs × ${job.labor_rate || 85} = ${Number(job.total_labor_cost ?? ((job.labor_hours || 0) * (job.labor_rate || 85))).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -734,6 +893,9 @@ export default function JobDetails({ jobId, onBack, onEdit }) {
               )}
             </CardContent>
           </Card>
+
+          {/* Job Notes Timeline */}
+          <JobNotesTimeline job={job} />
         </div>
       </div>
 

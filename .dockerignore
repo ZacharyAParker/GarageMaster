@@ -1,0 +1,7 @@
+.git
+node_modules
+dist
+*.log
+GEMINI.md
+README.md
+scripts/

@@ -1,0 +1,8 @@
+services:
+  garagemaster:
+    build: .
+    image: garagemaster:latest
+    container_name: garagemaster
+    ports:
+      - "8088:80"
+    restart: unless-stopped

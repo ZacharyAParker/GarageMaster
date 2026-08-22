@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect } from "react";
+import {  useState, useEffect  } from "react";
 import api from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus } from "lucide-react";
 
@@ -51,7 +51,7 @@ export default function Jobs() {
 
   const { data: employees = [] } = useQuery({
     queryKey: ['users'],
-  queryFn: () => api.entities.User.list()
+  queryFn: () => api.auth.listUsers()
   });
 
   const filteredJobs = statusFilter === "all" 
@@ -99,7 +99,6 @@ export default function Jobs() {
           job={editingJob}
           preselectedVehicleId={preselectedVehicleId}
           vehicles={vehicles}
-          customers={customers}
           employees={employees}
           onClose={() => {
             setShowForm(false);
@@ -118,6 +117,8 @@ export default function Jobs() {
                 <TabsTrigger value="all">All</TabsTrigger>
                 <TabsTrigger value="intake">Intake</TabsTrigger>
                 <TabsTrigger value="in_progress">In Progress</TabsTrigger>
+                <TabsTrigger value="waiting_for_parts">Waiting Parts</TabsTrigger>
+                <TabsTrigger value="quality_check">Quality Check</TabsTrigger>
                 <TabsTrigger value="awaiting_approval">Awaiting Approval</TabsTrigger>
                 <TabsTrigger value="ready_for_pickup">Ready</TabsTrigger>
                 <TabsTrigger value="completed">Completed</TabsTrigger>

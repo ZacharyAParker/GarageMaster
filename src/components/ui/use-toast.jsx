@@ -1,5 +1,5 @@
 // Inspired by react-hot-toast library
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect } from "react";
 
 const TOAST_LIMIT = 20;
 const TOAST_REMOVE_DELAY = 1000000;
@@ -36,7 +36,9 @@ const addToRemoveQueue = (toastId) => {
   toastTimeouts.set(toastId, timeout);
 };
 
-const clearFromRemoveQueue = (toastId) => {
+// Kept for parity with upstream shadcn/ui; currently unused because toasts
+// are only ever dismissed by timeout or explicit dismiss.
+export const clearFromRemoveQueue = (toastId) => {
   const timeout = toastTimeouts.get(toastId);
   if (timeout) {
     clearTimeout(timeout);

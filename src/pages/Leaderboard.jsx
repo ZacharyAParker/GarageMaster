@@ -1,15 +1,15 @@
 
-import React from "react";
+
 import api from "@/api/client";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+
 import { Trophy, Star, Zap, TrendingUp, Award } from "lucide-react";
 
 export default function Leaderboard() {
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
-  queryFn: () => api.entities.User.list()
+  queryFn: () => api.auth.listUsers()
   });
 
   const { data: jobs = [] } = useQuery({
@@ -17,12 +17,23 @@ export default function Leaderboard() {
   queryFn: () => api.entities.Job.list()
   });
 
+  const { data: inspections = [] } = useQuery({
+    queryKey: ['inspections'],
+  queryFn: () => api.entities.Inspection.list()
+  });
+
   const getMechanicStats = (userId) => {
     const mechanicJobs = jobs.filter(j => j.assigned_mechanic_id === userId);
     const completedJobs = mechanicJobs.filter(j => j.status === 'completed');
     const totalRevenue = completedJobs.reduce((sum, j) => sum + (j.total_cost || 0), 0);
-    const avgRating = completedJobs.length > 0 ? 4.5 : 0; // Simulated for now
-    
+    // Real quality signal: share of completed jobs with a clean inspection on file
+    const cleanInspections = completedJobs.filter(j =>
+      inspections.some(i => i.job_id === j.id && i.overall_status === 'ok')
+    ).length;
+    const avgRating = completedJobs.length > 0
+      ? Math.round((cleanInspections / completedJobs.length) * 50) / 10
+      : 0;
+
     return {
       completedJobs: completedJobs.length,
       totalRevenue,
