@@ -69,3 +69,9 @@ App lands on port 8088. Data persists in the `garagemaster-pgdata` volume. Set `
 ## Migrating from an old install
 
 If you ran the localStorage-only version: open it, go to Settings > Data, export the backup, then use restore in the new version's Settings > Data tab. Users come over without passwords (everyone claims theirs on next sign in), which is deliberate since hashes were never exportable.
+
+## License
+
+Original code and technical documentation are [MIT licensed](LICENSE).
+Art, music and other creative assets are excluded; third-party material keeps
+its own terms. See [license scope](LICENSE-SCOPE.md).
